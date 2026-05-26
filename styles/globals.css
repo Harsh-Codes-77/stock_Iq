@@ -1,0 +1,126 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --navy: #0B1E3D;
+  --blue: #185FA5;
+  --teal: #1D9E75;
+  --amber: #BA7517;
+  --red: #A32D2D;
+  --green: #27500A;
+  --bg: #F7F8FA;
+  --bg2: #EDEEF1;
+  --card: #FFFFFF;
+  --border: #E2E4E9;
+  --text: #111827;
+  --muted: #6B7280;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F1117; --bg2: #1A1D24; --card: #1E2330;
+    --border: #2A2F3D; --text: #F0F2F5; --muted: #8892A4;
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+
+/* ── Responsive Grids ── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 0.875rem;
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 1rem;
+}
+
+.grid-1-2 {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 12px;
+  margin-bottom: 1rem;
+}
+
+.grid-popular {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Custom Scrollbar for Premium Feel ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ── Mobile Overrides ── */
+@media (max-width: 768px) {
+  body {
+    font-size: 13.5px;
+  }
+  
+  .grid-2, .grid-3, .grid-1-2 {
+    grid-template-columns: 1fr !important;
+    gap: 10px;
+  }
+  
+  .mobile-card-padding {
+    padding: 1rem !important;
+  }
+  
+  .mobile-stack {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  
+  .mobile-hide {
+    display: none !important;
+  }
+  
+  .mobile-text-lg {
+    font-size: 18px !important;
+  }
+
+  .mobile-table th, .mobile-table td {
+    padding: 6px 8px !important;
+    font-size: 11px !important;
+  }
+}
+
