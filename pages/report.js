@@ -22,7 +22,7 @@ const ACTION_COLOR = a => a === 'BUY' ? '#22543D' : a === 'AVOID' ? '#742A2A' : 
 
 export default function Report() {
   const router = useRouter();
-  const { company, sector, price, marketCap } = router.query;
+  const { company, sector, price, marketCap, skipLive } = router.query;
 
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(false);
@@ -42,16 +42,31 @@ export default function Report() {
     setLoading(true); setError(''); setData(null); setStep(0);
     const interval = setInterval(() => setStep(p => Math.min(p + 1, STEPS.length - 1)), 2200);
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
       const res = await fetch('/api/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company, sector, price, marketCap })
+        body: JSON.stringify({ company, sector, price, marketCap, skipLive }),
+        signal: controller.signal
       });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'Failed to generate report');
+      clearTimeout(timeoutId);
+      const text = await res.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch (err) {
+        const snippet = text ? text.slice(0, 200) : '';
+        throw new Error(snippet ? `Invalid JSON response: ${snippet}` : 'Empty response from server');
+      }
+      if (!res.ok || !json.success) throw new Error(json.error || `Failed to generate report (${res.status})`);
       setData(json.data);
     } catch (e) {
+      if (e.name === 'AbortError') {
+        setError('Request timed out. Try Skip live data fetch or check your API key/network.');
+      } else {
       setError(e.message);
+      }
     } finally {
       clearInterval(interval);
       setLoading(false);
@@ -87,6 +102,10 @@ export default function Report() {
     { id:'smartmoney',label:'Smart Money'},
     { id:'verdict',   label:'Verdict'    },
   ];
+
+  const revenueSegments = Array.isArray(data?.businessOverview?.revenueSegments)
+    ? data.businessOverview.revenueSegments
+    : [];
 
   return (
     <>
@@ -195,6 +214,13 @@ export default function Report() {
             </div>
           )}
 
+          {data._aiModel === 'fallback' && (
+            <div style={{background:'#FFFBEB',border:'1px solid #FBD38D',borderRadius:10,padding:'10px 14px',marginBottom:'1rem'}}>
+              <div style={{fontSize:12,fontWeight:600,color:'#744210',marginBottom:4}}>AI analysis unavailable</div>
+              <div style={{fontSize:12,color:'#744210'}}>{data._fetchError || 'AI provider did not return a result.'}</div>
+            </div>
+          )}
+
           {/* OVERALL SCORE */}
           <div className="grid-1-2">
             <div style={CARD}>
@@ -253,12 +279,18 @@ export default function Report() {
                 </div>
                 <div style={CARD}>
                   <div style={CARD_LABEL}>🍩 Revenue Segments</div>
-                  <ChartComp type="doughnut" data={{
-                    labels: data.businessOverview.revenueSegments.map(s=>s.name),
-                    datasets:[{data: data.businessOverview.revenueSegments.map(s=>s.percentage),
-                      backgroundColor: data.businessOverview.revenueSegments.map(s=>s.color||'#185FA5'),
-                      borderWidth:3}]
-                  }} height={200} />
+                  {revenueSegments.length ? (
+                    <ChartComp type="doughnut" data={{
+                      labels: revenueSegments.map(s=>s.name),
+                      datasets:[{data: revenueSegments.map(s=>s.percentage),
+                        backgroundColor: revenueSegments.map(s=>s.color||'#185FA5'),
+                        borderWidth:3}]
+                    }} height={200} />
+                  ) : (
+                    <div style={{fontSize:12,color:'var(--muted)',padding:'0.5rem 0'}}>
+                      No segment breakdown available.
+                    </div>
+                  )}
                 </div>
               </TwoCol>
 
@@ -453,95 +485,104 @@ export default function Report() {
 
           {/* ── VALUATION TAB ── */}
           {tab==='valuation' && (
-            <div>
-              {/* Scenario cards */}
-              <div className="grid-3">
-                {[
-                  ['BEAR CASE', data.valuation.bear, '#FFF5F5','#742A2A'],
-                  ['BASE CASE', data.valuation.base, '#EBF8FF','#2B6CB0'],
-                  ['BULL CASE', data.valuation.bull, '#F0FFF4','#22543D'],
-                ].map(([label,sc,bg,col])=>(
-                  <div key={label} style={{background:bg,borderRadius:12,padding:'1.25rem',textAlign:'center',border:`1px solid ${col}40`}}>
-                    <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.5px',color:col,marginBottom:8}}>{label}</div>
-                    <div style={{fontSize:26,fontWeight:700,color:col}}>₹{sc?.price?.toLocaleString('en-IN')}</div>
-                    <div style={{fontSize:13,color:col,margin:'6px 0'}}>{sc?.upside > 0 ? '+' : ''}{sc?.upside}% from CMP</div>
-                    <div style={{fontSize:11,color:col,opacity:0.8,lineHeight:1.6}}>{sc?.assumption}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Target prices */}
-              <div className="grid-3">
-                {[
-                  ['1 Year Target', data.valuation.targets.oneYear],
-                  ['3 Year Target', data.valuation.targets.threeYear],
-                  ['5 Year Target', data.valuation.targets.fiveYear],
-                ].map(([label,t])=>(
-                  <div key={label} style={{background:'var(--bg2)',borderRadius:12,padding:'1rem',textAlign:'center'}}>
-                    <div style={{fontSize:11,color:'var(--muted)',marginBottom:6}}>{label}</div>
-                    <div style={{fontSize:22,fontWeight:700}}>₹{t?.price?.toLocaleString('en-IN')}</div>
-                    <div style={{fontSize:12,color:'#185FA5',margin:'4px 0'}}>+{t?.upside}% upside</div>
-                    <div style={{fontSize:11,color:'var(--muted)'}}>{t?.cagr}% CAGR</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* DCF assumptions */}
-              <div style={CARD}>
-                <div style={CARD_LABEL}>🧮 DCF Assumptions</div>
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:10}}>
+            data?.valuation ? (
+              <div>
+                {/* Scenario cards */}
+                <div className="grid-3">
                   {[
-                    ['WACC', `${data.valuation.dcfAssumptions.wacc}%`],
-                    ['Terminal Growth', `${data.valuation.dcfAssumptions.terminalGrowth}%`],
-                    ['Revenue CAGR', `${data.valuation.dcfAssumptions.revenueCagr}%`],
-                    ['EBITDA Margin', `${data.valuation.dcfAssumptions.ebitdaMargin}%`],
-                  ].map(([k,v])=>(
-                    <div key={k} style={{background:'var(--bg2)',borderRadius:8,padding:'10px 12px',textAlign:'center'}}>
-                      <div style={{fontSize:10,color:'var(--muted)',marginBottom:4}}>{k}</div>
-                      <div style={{fontSize:18,fontWeight:700}}>{v}</div>
+                    ['BEAR CASE', data.valuation.bear, '#FFF5F5','#742A2A'],
+                    ['BASE CASE', data.valuation.base, '#EBF8FF','#2B6CB0'],
+                    ['BULL CASE', data.valuation.bull, '#F0FFF4','#22543D'],
+                  ].map(([label,sc,bg,col])=>(
+                    <div key={label} style={{background:bg,borderRadius:12,padding:'1.25rem',textAlign:'center',border:`1px solid ${col}40`}}>
+                      <div style={{fontSize:10,fontWeight:700,letterSpacing:'0.5px',color:col,marginBottom:8}}>{label}</div>
+                      <div style={{fontSize:26,fontWeight:700,color:col}}>₹{sc?.price?.toLocaleString('en-IN')}</div>
+                      <div style={{fontSize:13,color:col,margin:'6px 0'}}>{sc?.upside > 0 ? '+' : ''}{sc?.upside}% from CMP</div>
+                      <div style={{fontSize:11,color:col,opacity:0.8,lineHeight:1.6}}>{sc?.assumption}</div>
                     </div>
                   ))}
                 </div>
-              </div>
 
-              {/* Sensitivity table */}
-              <div style={CARD}>
-                <div style={CARD_LABEL}>📊 DCF Sensitivity Matrix — Intrinsic Value per Share (₹)</div>
-                <div style={{overflowX:'auto'}}>
-                  <table className="mobile-table" style={TABLE}>
-                    <thead><tr style={{background:'var(--bg2)'}}>
-                      <th style={TH}>WACC \ TG</th>
-                      {data.valuation.sensitivityMatrix.tgValues.map(v=><th key={v} style={TH}>{v}%</th>)}
-                    </tr></thead>
-                    <tbody>
-                      {data.valuation.sensitivityMatrix.matrix.map((row,i)=>(
-                        <tr key={i} style={{background: i===2?'rgba(24,95,165,0.07)':'transparent'}}>
-                          <td style={{...TH,textAlign:'left'}}>{data.valuation.sensitivityMatrix.waccValues[i]}%{i===2?' (Base)':''}</td>
-                          {row.map((v,j)=>(
-                            <td key={j} style={{...TD,textAlign:'right',fontWeight: i===2&&j===Math.floor(row.length/2)?700:400,
-                              color: v > data.company.cmp*1.2 ? '#22543D' : v < data.company.cmp*0.9 ? '#742A2A' : 'inherit'}}>
-                              ₹{v?.toLocaleString('en-IN')}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Multibagger triggers */}
-              <div style={CARD}>
-                <div style={CARD_LABEL}>🚀 Multibagger Triggers</div>
-                <div className="grid-2" style={{marginBottom:0}}>
-                  {data.multibaggerTriggers?.map((t,i)=>(
-                    <div key={i} style={{background:'#EFF6FF',borderRadius:8,padding:'0.875rem',fontSize:12,color:'#1e3a5f',lineHeight:1.6,border:'1px solid #BFDBFE'}}>
-                      ⚡ {t}
+                {/* Target prices */}
+                <div className="grid-3">
+                  {[
+                    ['1 Year Target', data.valuation.targets?.oneYear],
+                    ['3 Year Target', data.valuation.targets?.threeYear],
+                    ['5 Year Target', data.valuation.targets?.fiveYear],
+                  ].map(([label,t])=>(
+                    <div key={label} style={{background:'var(--bg2)',borderRadius:12,padding:'1rem',textAlign:'center'}}>
+                      <div style={{fontSize:11,color:'var(--muted)',marginBottom:6}}>{label}</div>
+                      <div style={{fontSize:22,fontWeight:700}}>₹{t?.price?.toLocaleString('en-IN')}</div>
+                      <div style={{fontSize:12,color:'#185FA5',margin:'4px 0'}}>+{t?.upside}% upside</div>
+                      <div style={{fontSize:11,color:'var(--muted)'}}>{t?.cagr}% CAGR</div>
                     </div>
                   ))}
                 </div>
+
+                {/* DCF assumptions */}
+                <div style={CARD}>
+                  <div style={CARD_LABEL}>🧮 DCF Assumptions</div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:10}}>
+                    {[
+                      ['WACC', `${data.valuation.dcfAssumptions?.wacc}%`],
+                      ['Terminal Growth', `${data.valuation.dcfAssumptions?.terminalGrowth}%`],
+                      ['Revenue CAGR', `${data.valuation.dcfAssumptions?.revenueCagr}%`],
+                      ['EBITDA Margin', `${data.valuation.dcfAssumptions?.ebitdaMargin}%`],
+                    ].map(([k,v])=>(
+                      <div key={k} style={{background:'var(--bg2)',borderRadius:8,padding:'10px 12px',textAlign:'center'}}>
+                        <div style={{fontSize:10,color:'var(--muted)',marginBottom:4}}>{k}</div>
+                        <div style={{fontSize:18,fontWeight:700}}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sensitivity table */}
+                <div style={CARD}>
+                  <div style={CARD_LABEL}>📊 DCF Sensitivity Matrix — Intrinsic Value per Share (₹)</div>
+                  <div style={{overflowX:'auto'}}>
+                    <table className="mobile-table" style={TABLE}>
+                      <thead><tr style={{background:'var(--bg2)'}}>
+                        <th style={TH}>WACC \ TG</th>
+                        {data.valuation.sensitivityMatrix?.tgValues?.map(v=><th key={v} style={TH}>{v}%</th>)}
+                      </tr></thead>
+                      <tbody>
+                        {data.valuation.sensitivityMatrix?.matrix?.map((row,i)=>(
+                          <tr key={i} style={{background: i===2?'rgba(24,95,165,0.07)':'transparent'}}>
+                            <td style={{...TH,textAlign:'left'}}>{data.valuation.sensitivityMatrix?.waccValues?.[i]}%{i===2?' (Base)':''}</td>
+                            {row.map((v,j)=>(
+                              <td key={j} style={{...TD,textAlign:'right',fontWeight: i===2&&j===Math.floor(row.length/2)?700:400,
+                                color: v > data.company.cmp*1.2 ? '#22543D' : v < data.company.cmp*0.9 ? '#742A2A' : 'inherit'}}>
+                                ₹{v?.toLocaleString('en-IN')}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Multibagger triggers */}
+                <div style={CARD}>
+                  <div style={CARD_LABEL}>🚀 Multibagger Triggers</div>
+                  <div className="grid-2" style={{marginBottom:0}}>
+                    {data.multibaggerTriggers?.map((t,i)=>(
+                      <div key={i} style={{background:'#EFF6FF',borderRadius:8,padding:'0.875rem',fontSize:12,color:'#1e3a5f',lineHeight:1.6,border:'1px solid #BFDBFE'}}>
+                        ⚡ {t}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div style={CARD}>
+                <div style={CARD_LABEL}>Valuation Unavailable</div>
+                <div style={{fontSize:13,color:'var(--muted)'}}>
+                  Valuation data is missing from the AI response. Try regenerating the report.
+                </div>
+              </div>
+            )
           )}
 
           {/* ── MANAGEMENT TAB ── */}

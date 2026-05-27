@@ -9,29 +9,55 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { company, sector, price: manualPrice, marketCap: manualMcap } = req.body;
-  if (!company) return res.status(400).json({ error: 'Company name required' });
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Report generation timed out. Try enabling Skip live data fetch.' });
+    }
+  }, TOTAL_TIMEOUT_MS);
+
+  const safeJson = (status, body) => {
+    if (timedOut || res.headersSent) return;
+    clearTimeout(timeoutId);
+    res.status(status).json(body);
+  };
+
+  const { company, sector, price: manualPrice, marketCap: manualMcap, skipLive } = req.body;
+  if (!company) return safeJson(400, { error: 'Company name required' });
 
   // ── Check for API keys ────────────────────────────────────────────────────────
   const openrouterKey = process.env.OPENROUTER_API_KEY;
   const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+  const openrouterMaxTokens = Number(process.env.OPENROUTER_MAX_TOKENS || 8192);
   const geminiKey = process.env.GEMINI_API_KEY;
 
   if (!openrouterKey && !geminiKey) {
-    return res.status(500).json({
-      error: 'No API key configured. Set OPENROUTER_API_KEY or GEMINI_API_KEY in .env.local'
+    const fallback = buildFallbackReport({
+      company,
+      sector,
+      realData,
+      manualPrice,
+      manualMcap,
+      dataFetchError,
+      reason: 'No API key configured'
     });
+    return safeJson(200, { success: true, data: fallback });
   }
 
   // ── Step 1: Fetch all real data ──────────────────────────────────────────────
   let realData = null;
   let dataFetchError = null;
 
-  try {
-    realData = await fetchAllData(company, null);
-  } catch (err) {
-    dataFetchError = err.message;
-    console.error('[report] Data fetch failed:', err.message);
+  if (skipLive === '1' || skipLive === true) {
+    dataFetchError = 'Live data fetch skipped by user';
+  } else {
+    try {
+      realData = await fetchAllData(company, null);
+    } catch (err) {
+      dataFetchError = err.message;
+      console.error('[report] Data fetch failed:', err.message);
+    }
   }
 
   // Use manual overrides if provided
@@ -46,10 +72,10 @@ export default async function handler(req, res) {
 
   // ── 3a. OpenRouter (primary — any model, no free-tier rate limits) ───────────
   if (openrouterKey) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= MAX_AI_ATTEMPTS; attempt++) {
       try {
-        console.log(`[report] OpenRouter attempt ${attempt}/2 with ${openrouterModel}`);
-        const result = await callOpenRouter(openrouterKey, openrouterModel, prompt);
+        console.log(`[report] OpenRouter attempt ${attempt}/${MAX_AI_ATTEMPTS} with ${openrouterModel}`);
+        const result = await callOpenRouter(openrouterKey, openrouterModel, openrouterMaxTokens, prompt);
         console.log(`[report] OpenRouter success — ${result.raw.length} chars`);
 
         const report = extractJson(result.raw, result.truncated);
@@ -58,23 +84,44 @@ export default async function handler(req, res) {
         report._fetchError  = dataFetchError;
         report._aiModel     = `${openrouterModel} (OpenRouter)`;
 
-        res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate');
-        return res.status(200).json({ success: true, data: report });
+        if (!timedOut) res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate');
+        return safeJson(200, { success: true, data: report });
       } catch (err) {
         lastError = err;
         console.error(`[report] OpenRouter attempt ${attempt} failed:`, err.message);
-        if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
+        const affordable = parseAffordableTokens(err.message);
+        if (affordable && affordable < openrouterMaxTokens) {
+          const capped = Math.max(256, Math.floor(affordable * 0.9));
+          try {
+            console.log(`[report] Retrying OpenRouter with max_tokens=${capped}`);
+            const result = await callOpenRouter(openrouterKey, openrouterModel, capped, prompt);
+            console.log(`[report] OpenRouter success — ${result.raw.length} chars`);
+
+            const report = extractJson(result.raw, result.truncated);
+            report._dataSources = realData?.meta?.sources || ['AI knowledge'];
+            report._dataQuality = realData?.dataQuality || {};
+            report._fetchError  = dataFetchError;
+            report._aiModel     = `${openrouterModel} (OpenRouter)`;
+
+            if (!timedOut) res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate');
+            return safeJson(200, { success: true, data: report });
+          } catch (retryErr) {
+            lastError = retryErr;
+            console.error('[report] OpenRouter retry failed:', retryErr.message);
+          }
+        }
+        if (attempt < MAX_AI_ATTEMPTS) await new Promise(r => setTimeout(r, 2000));
       }
     }
   }
 
   // ── 3b. Gemini Direct fallback (free but rate-limited) ──────────────────────
   if (geminiKey) {
-    const models = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+    const models = ['gemini-1.5-flash-8b', 'gemini-2.5-flash', 'gemini-1.5-flash'];
     for (const model of models) {
-      for (let attempt = 1; attempt <= 2; attempt++) {
+      for (let attempt = 1; attempt <= MAX_AI_ATTEMPTS; attempt++) {
         try {
-          console.log(`[report] Gemini attempt ${attempt}/2 with ${model}`);
+          console.log(`[report] Gemini attempt ${attempt}/${MAX_AI_ATTEMPTS} with ${model}`);
           const result = await callGeminiDirect(geminiKey, model, prompt);
           console.log(`[report] Gemini success — ${result.raw.length} chars`);
 
@@ -84,42 +131,246 @@ export default async function handler(req, res) {
           report._fetchError  = dataFetchError;
           report._aiModel     = `${model} (free)`;
 
-          res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate');
-          return res.status(200).json({ success: true, data: report });
+          if (!timedOut) res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate');
+          return safeJson(200, { success: true, data: report });
         } catch (err) {
           lastError = err;
           console.error(`[report] Gemini ${model} attempt ${attempt} failed:`, err.message);
-          if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
+          if (attempt < MAX_AI_ATTEMPTS) await new Promise(r => setTimeout(r, 2000));
         }
       }
     }
   }
 
   console.error('[report] All AI providers failed:', lastError?.message);
-  return res.status(500).json({ error: lastError?.message || 'All AI providers failed' });
+  const fallback = buildFallbackReport({
+    company,
+    sector,
+    realData,
+    manualPrice,
+    manualMcap,
+    dataFetchError,
+    reason: lastError?.message || 'All AI providers failed'
+  });
+  return safeJson(200, { success: true, data: fallback });
+}
+
+const TOTAL_TIMEOUT_MS = 60000;
+const AI_TIMEOUT_MS = 50000;
+const MAX_AI_ATTEMPTS = 1;
+
+function parseAffordableTokens(message = '') {
+  const match = message.match(/can only afford\s+(\d+)/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function buildFallbackReport({ company, sector, realData, manualPrice, manualMcap, dataFetchError, reason }) {
+  const cmpRaw = realData?.price?.current ?? manualPrice ?? 1;
+  const cmp = Number(cmpRaw) > 0 ? Number(cmpRaw) : 1;
+  const marketCapCr = Number(realData?.marketCap?.crores ?? manualMcap ?? 0);
+  const name = realData?.meta?.companyName || company;
+  const symbol = realData?.meta?.symbol || '';
+  const exchange = realData?.meta?.exchange || 'NSE/BSE';
+  const sectorName = realData?.meta?.sector || sector || 'Unspecified';
+
+  const placeholderYears = ['FY22', 'FY23', 'FY24'];
+  const zeroSeries = placeholderYears.map((year) => ({ year, value: 0 }));
+  const ratioHistory = placeholderYears.map((year) => ({ year, value: 0 }));
+
+  return {
+    company: {
+      name,
+      symbol,
+      sector: sectorName,
+      exchange,
+      rating: 'HOLD',
+      cmp,
+      targetPrice: Math.round(cmp * 1.1),
+      marketCapCr: marketCapCr || 0,
+      fiftyTwoWeekHigh: cmp,
+      fiftyTwoWeekLow: cmp,
+    },
+    scores: {
+      overall: 55,
+      businessQuality: 5,
+      managementQuality: 5,
+      financialQuality: 5,
+      growthVisibility: 5,
+      competitiveMoat: 5,
+      valuationComfort: 5,
+      cashFlowQuality: 5,
+    },
+    executiveSummary: {
+      oneLiner: 'Fallback report generated due to data or AI provider limits.',
+      investmentThesis: 'Add valid API keys and retry for a full institutional report.',
+      biggestOpportunity: 'Data access restored and real financials analyzed.',
+      biggestRisk: 'Current report is a placeholder without live data.',
+      idealInvestor: 'Investors seeking a quick overview before deep diligence.',
+    },
+    businessOverview: {
+      whatItDoes: 'Company overview unavailable in fallback mode.',
+      howItEarnsMoney: 'Revenue model details unavailable in fallback mode.',
+      eli15: 'This is a placeholder report while data or AI is unavailable.',
+      revenueSegments: [
+        { name: 'Core Business', percentage: 100, color: '#185FA5' }
+      ],
+      hiddenStrengths: [],
+      hiddenWeaknesses: [],
+    },
+    competitors: [],
+    industryAnalysis: {
+      size: 'N/A',
+      growthRate: 0,
+      tailwinds: [],
+      headwinds: [],
+      leaders: [],
+    },
+    news: realData?.news || [],
+    financials: {
+      revenueGrowth: zeroSeries,
+      ebitdaGrowth: zeroSeries,
+      patGrowth: zeroSeries,
+      margins: placeholderYears.map((year) => ({ year, ebitda: 0, net: 0 })),
+      quarterlyRevenue: [
+        { quarter: 'Q4 FY24', revenue: 0, ebitda: 0 }
+      ],
+    },
+    ratios: {
+      peRatio: 0,
+      pbRatio: 0,
+      evEbitda: 0,
+      debtEquity: 0,
+      interestCoverage: 0,
+      currentRatio: 0,
+      cfoPat: 0,
+      dividendYield: 0,
+      roeHistory: ratioHistory,
+      roceHistory: ratioHistory,
+    },
+    valuation: {
+      bear: { price: Math.round(cmp * 0.9), upside: -10, assumption: 'Conservative scenario (fallback)' },
+      base: { price: Math.round(cmp * 1.1), upside: 10, assumption: 'Base scenario (fallback)' },
+      bull: { price: Math.round(cmp * 1.25), upside: 25, assumption: 'Optimistic scenario (fallback)' },
+      targets: {
+        oneYear: { price: Math.round(cmp * 1.1), upside: 10, cagr: 10 },
+        threeYear: { price: Math.round(cmp * 1.3), upside: 30, cagr: 9 },
+        fiveYear: { price: Math.round(cmp * 1.5), upside: 50, cagr: 8 },
+      },
+      dcfAssumptions: {
+        wacc: 12,
+        terminalGrowth: 4,
+        revenueCagr: 8,
+        ebitdaMargin: 15,
+      },
+      sensitivityMatrix: {
+        tgValues: [3, 4, 5],
+        waccValues: [11, 12, 13],
+        matrix: [
+          [Math.round(cmp * 1.2), Math.round(cmp * 1.15), Math.round(cmp * 1.1)],
+          [Math.round(cmp * 1.1), Math.round(cmp * 1.05), Math.round(cmp * 1.0)],
+          [Math.round(cmp * 1.0), Math.round(cmp * 0.95), Math.round(cmp * 0.9)],
+        ],
+      },
+    },
+    multibaggerTriggers: [],
+    management: {
+      score: 5,
+      capitalAllocationRating: 'Average',
+      promoterStake: realData?.shareholding?.promoter || 0,
+      pledgedShares: 0,
+      background: 'Management background unavailable in fallback mode.',
+      greenFlags: [],
+      redFlags: [],
+    },
+    shareholding: {
+      current: {
+        promoter: realData?.shareholding?.promoter || 0,
+        fii: realData?.shareholding?.fii || 0,
+        dii: realData?.shareholding?.dii || 0,
+        public: realData?.shareholding?.public || 0,
+      },
+      trend: [
+        { quarter: 'Q4 FY24', promoter: realData?.shareholding?.promoter || 0, fii: realData?.shareholding?.fii || 0, dii: realData?.shareholding?.dii || 0 },
+      ],
+    },
+    forensic: {
+      overallScore: 5,
+      cfoPat: 0,
+      receivableDays: 0,
+      inventoryDays: 0,
+      checks: [],
+    },
+    concall: {
+      managementCredibility: 5,
+      promises: [],
+    },
+    risks: [
+      { name: 'Data availability', severity: 7, level: 'HIGH', description: 'Live data or AI provider unavailable.' },
+    ],
+    smartMoney: [],
+    buyReasons: [],
+    avoidReasons: [],
+    finalVerdict: {
+      rating: 'HOLD',
+      conviction: 'Low',
+      riskLevel: 'Medium',
+      expectedCagr3yr: 0,
+      idealBuyZone: 'N/A',
+      sipSuitable: false,
+      suitableFor: 'Further research required',
+      keyMetricToTrack: 'Revenue growth',
+      reratingTrigger: 'Restored data access',
+      deratingTrigger: 'Prolonged data unavailability',
+      exitSignals: [],
+    },
+    _dataSources: realData?.meta?.sources || ['Fallback'],
+    _dataQuality: realData?.dataQuality || {},
+    _fetchError: dataFetchError || reason,
+    _aiModel: 'fallback',
+  };
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = AI_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // ── OpenRouter API call (OpenAI-compatible format) ────────────────────────────
-async function callOpenRouter(apiKey, model, prompt) {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://stockiq.app',
-      'X-Title': 'StockIQ Research'
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: 'You are an elite institutional equity research analyst. Return ONLY valid JSON — no markdown, no explanation.' },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.3,
-      max_tokens: 4096,
-      response_format: { type: 'json_object' }
-    })
-  });
+async function callOpenRouter(apiKey, model, maxTokens, prompt) {
+  let response;
+  try {
+    response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://stockiq.app',
+        'X-Title': 'StockIQ Research'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: 'You are an elite institutional equity research analyst. Return ONLY valid JSON - no markdown, no explanation.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.3,
+        max_tokens: maxTokens,
+        response_format: { type: 'json_object' }
+      })
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`OpenRouter request timed out after ${AI_TIMEOUT_MS / 1000}s`);
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const errText = await response.text();
@@ -141,7 +392,7 @@ async function callGeminiDirect(apiKey, model, prompt) {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.3,
-      maxOutputTokens: 65536,
+      maxOutputTokens: 8192,
       responseMimeType: 'application/json'
     }
   };
@@ -150,10 +401,18 @@ async function callGeminiDirect(apiKey, model, prompt) {
     requestBody.generationConfig.thinkingConfig = { thinkingBudget: 0 };
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) }
-  );
+  let response;
+  try {
+    response = await fetchWithTimeout(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) }
+    );
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Gemini request timed out after ${AI_TIMEOUT_MS / 1000}s`);
+    }
+    throw err;
+  }
 
   if (response.status === 429) {
     throw new Error(`Rate limited on ${model}`);

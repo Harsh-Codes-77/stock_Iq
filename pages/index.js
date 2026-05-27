@@ -18,6 +18,7 @@ export default function Home() {
   const [sector, setSector] = useState('');
   const [price, setPrice] = useState('');
   const [marketCap, setMarketCap] = useState('');
+  const [skipLive, setSkipLive] = useState(false);
   const [hoveredChip, setHoveredChip] = useState('');
 
   function handleAnalyze() {
@@ -26,6 +27,7 @@ export default function Home() {
     if (sector) params.set('sector', sector);
     if (price) params.set('price', price);
     if (marketCap) params.set('marketCap', marketCap);
+    if (skipLive) params.set('skipLive', '1');
     router.push('/report?' + params.toString());
   }
 
@@ -91,6 +93,15 @@ export default function Home() {
               <div key={label}><label style={{fontSize:11,color:'var(--muted)',display:'block',marginBottom:4}}>{label}</label>{input}</div>
             ))}
           </div>
+
+          <label style={{display:'flex',alignItems:'center',gap:8,fontSize:12,color:'var(--muted)',marginBottom:10}}>
+            <input
+              type="checkbox"
+              checked={skipLive}
+              onChange={e=>setSkipLive(e.target.checked)}
+            />
+            Skip live data fetch (use AI only if sources are blocked)
+          </label>
 
           <div className="grid-popular">
             <span style={{fontSize:11,color:'var(--muted)'}}>Popular:</span>
