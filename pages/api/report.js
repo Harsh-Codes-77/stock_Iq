@@ -121,7 +121,7 @@ export default async function handler(req, res) {
 
   // ── 3b. Gemini Direct fallback (free but rate-limited) ──────────────────────
   if (geminiKey) {
-    const models = ['gemini-1.5-flash-8b-latest', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-pro'];
+    const models = ['gemini-2.5-flash', 'gemini-2.0-flash-lite-001', 'gemini-2.0-flash'];
     for (const model of models) {
       for (let attempt = 1; attempt <= MAX_AI_ATTEMPTS; attempt++) {
         try {
