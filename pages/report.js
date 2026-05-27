@@ -227,8 +227,8 @@ export default function Report() {
               <div style={CARD_LABEL}>Overall Score</div>
               <div style={{textAlign:'center',padding:'0.5rem'}}>
                 <div style={{fontSize:52,fontWeight:700,color:'#185FA5'}}>{data.scores.overall}</div>
-                <ScoreBar value={data.scores.overall} color='#185FA5' />
-                <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>out of 100</div>
+                <ScoreBar value={data.scores.overall * 10} color='#185FA5' />
+                <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>out of 10</div>
               </div>
             </div>
             <div style={CARD}>
