@@ -5,6 +5,10 @@
 
 import { fetchAllData } from '../../lib/fetchAllData.js';
 
+export const config = {
+  maxDuration: 60, // Set Vercel max execution time to 60 seconds
+};
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
