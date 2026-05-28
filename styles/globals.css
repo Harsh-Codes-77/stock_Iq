@@ -138,7 +138,25 @@ input, select, textarea { font-family: inherit; }
 /* ── Responsive ────────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   body { font-size: 13px; }
+  h2 { font-size: 24px !important; }
   .card { padding: 12px; }
   .tab-btn { padding: 8px 12px; font-size: 10px; }
   .data-table th, .data-table td { padding: 5px 6px; font-size: 11px; }
+  .hidden-mobile {
+    display: none !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .hidden-xs-mobile {
+    display: none !important;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+}
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
 }

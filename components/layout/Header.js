@@ -29,7 +29,7 @@ export default function Header({ companyName, symbol, price, priceChange, priceC
         height: '100%',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'between',
+        justifyContent: 'space-between',
         width: '100%'
       }}>
         {/* Left: Logo & Meta Info */}
@@ -53,9 +53,9 @@ export default function Header({ companyName, symbol, price, priceChange, priceC
           
           {companyName && (
             <>
-              <span style={{ color: 'var(--text-2)' }}>/</span>
+              <span className="hidden-mobile" style={{ color: 'var(--text-2)' }}>/</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                <span style={{
+                <span className="hidden-mobile" style={{
                   fontFamily: 'var(--font-sans)',
                   fontSize: '14px',
                   color: 'var(--text-0)',
@@ -107,6 +107,7 @@ export default function Header({ companyName, symbol, price, priceChange, priceC
           {hasData && onExportPDF && (
             <button
               onClick={onExportPDF}
+              className="hidden-xs-mobile"
               style={{
                 backgroundColor: 'var(--bg-1)',
                 border: '1px solid var(--border-subtle)',

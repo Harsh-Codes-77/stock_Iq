@@ -20,7 +20,7 @@ export default function ReportTabs({ activeTab, onTabChange }) {
       zIndex: 90,
       width: '100%'
     }}>
-      <div style={{
+      <div className="no-scrollbar" style={{
         maxWidth: '1200px',
         margin: '0 auto',
         padding: '0 16px',

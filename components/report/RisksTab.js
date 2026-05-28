@@ -46,7 +46,7 @@ export default function RisksTab({ data }) {
           Risk Factor Identification & Severity Matrix
         </h3>
         <div style={{ backgroundColor: 'var(--bg-1)', border: '1px solid var(--border-subtle)', padding: '16px', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+          <table style={{ width: '100%', minWidth: '650px', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                 <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-2)', fontWeight: 'normal' }}>RISK FACTOR</th>
