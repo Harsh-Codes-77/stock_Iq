@@ -6,6 +6,9 @@
 **Stack:** Next.js · Node.js · Google Gemini · Yahoo Finance · Recharts  
 **Disclaimer:** Not investment advice. Not SEBI registered. For research and educational purposes only.
 
+<img width="1918" height="927" alt="image" src="https://github.com/user-attachments/assets/b12d3961-62ac-41f9-b71a-7ae8cbf2d3e3" />
+
+
 ---
 
 ## Table of Contents
