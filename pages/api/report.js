@@ -21,6 +21,10 @@ import { buildSystemPrompt, buildUserPrompt } from '../../lib/geminiPrompt.js';
 const TOTAL_TIMEOUT_MS = 55000;
 const AI_TIMEOUT_MS = 40000;
 
+export const config = {
+  maxDuration: 60,
+};
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
@@ -42,8 +46,15 @@ export default async function handler(req, res) {
   const { ticker, sector } = req.body;
   if (!ticker) return safeJson(400, { error: 'Ticker required' });
 
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
+  const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+  const openrouterMaxTokens = Number(process.env.OPENROUTER_MAX_TOKENS || 8192);
+
   const geminiKey = process.env.GEMINI_API_KEY;
-  if (!geminiKey) return safeJson(500, { error: 'GEMINI_API_KEY not configured' });
+
+  if (!openrouterKey && !geminiKey) {
+    return safeJson(500, { error: 'Neither OPENROUTER_API_KEY nor GEMINI_API_KEY is configured' });
+  }
 
   // ── Step 1: Fetch all data ──────────────────────────────────────────────────
   let rawData = null;
@@ -82,21 +93,35 @@ export default async function handler(req, res) {
     { piotroski, beneish, altman, dupont, wcc, wacc, dcf, sensitivity }
   );
 
-  // ── Step 4: Call Gemini ─────────────────────────────────────────────────────
+  // ── Step 4: Call AI (OpenRouter with Gemini Fallback) ───────────────────────
   let aiAnalysis = null;
-  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
-  for (const model of models) {
+  if (openrouterKey) {
     try {
-      console.log(`[report] Calling Gemini ${model}...`);
-      const result = await callGemini(geminiKey, model, systemPrompt, userPrompt);
-      console.log(`[report] Gemini ${model} success — ${result.length} chars`);
+      console.log(`[report] Calling OpenRouter ${openrouterModel}...`);
+      const result = await callOpenRouter(openrouterKey, openrouterModel, openrouterMaxTokens, systemPrompt, userPrompt);
+      console.log(`[report] OpenRouter ${openrouterModel} success — ${result.length} chars`);
       aiAnalysis = extractJson(result);
-      break;
     } catch (err) {
-      console.error(`[report] Gemini ${model} failed:`, err.message);
-      if (model === models[models.length - 1]) {
-        console.error('[report] All Gemini models failed');
+      console.error(`[report] OpenRouter failed:`, err.message);
+    }
+  }
+
+  if (!aiAnalysis && geminiKey) {
+    const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+
+    for (const model of models) {
+      try {
+        console.log(`[report] Calling Gemini ${model}...`);
+        const result = await callGemini(geminiKey, model, systemPrompt, userPrompt);
+        console.log(`[report] Gemini ${model} success — ${result.length} chars`);
+        aiAnalysis = extractJson(result);
+        break;
+      } catch (err) {
+        console.error(`[report] Gemini ${model} failed:`, err.message);
+        if (model === models[models.length - 1]) {
+          console.error('[report] All Gemini models failed');
+        }
       }
     }
   }
@@ -188,6 +213,48 @@ async function callGemini(apiKey, model, systemPrompt, userPrompt) {
     const data = await response.json();
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     if (!raw) throw new Error(`Empty response from ${model}`);
+    return raw;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ── OpenRouter API call ───────────────────────────────────────────────────────────
+async function callOpenRouter(apiKey, model, maxTokens, systemPrompt, userPrompt) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://stockiq.app',
+        'X-Title': 'StockIQ Research',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: maxTokens,
+        response_format: { type: 'json_object' }
+      }),
+      signal: controller.signal,
+    });
+
+    if (response.status === 429) throw new Error(`OpenRouter rate limited on ${model}`);
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`OpenRouter ${response.status}: ${errText.slice(0, 300)}`);
+    }
+
+    const data = await response.json();
+    const raw = data?.choices?.[0]?.message?.content || '';
+    if (!raw) throw new Error(`Empty response from OpenRouter ${model}`);
     return raw;
   } finally {
     clearTimeout(timeout);
