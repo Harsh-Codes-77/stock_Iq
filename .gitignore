@@ -6,3 +6,10 @@ node_modules/
 .vercel
 *.log
 .DS_Store
+
+# Python venv and cache
+backend/.venv/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/db/data/
+

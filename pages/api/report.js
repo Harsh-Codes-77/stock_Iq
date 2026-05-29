@@ -20,6 +20,7 @@ import { buildSystemPrompt, buildUserPrompt } from '../../lib/geminiPrompt.js';
 
 const TOTAL_TIMEOUT_MS = 55000;
 const AI_TIMEOUT_MS = 40000;
+const BACKEND_URL = process.env.PYTHON_BACKEND_URL || 'http://localhost:8000';
 
 export const config = {
   maxDuration: 60,
@@ -46,14 +47,15 @@ export default async function handler(req, res) {
   const { ticker, sector } = req.body;
   if (!ticker) return safeJson(400, { error: 'Ticker required' });
 
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
+  try {
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
   const openrouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
   const openrouterMaxTokens = Number(process.env.OPENROUTER_MAX_TOKENS || 8192);
 
   const geminiKey = process.env.GEMINI_API_KEY;
 
   if (!openrouterKey && !geminiKey) {
-    return safeJson(500, { error: 'Neither OPENROUTER_API_KEY nor GEMINI_API_KEY is configured' });
+    throw new Error('Neither OPENROUTER_API_KEY nor GEMINI_API_KEY is configured');
   }
 
   // ── Step 1: Fetch all data ──────────────────────────────────────────────────
@@ -68,7 +70,7 @@ export default async function handler(req, res) {
   }
 
   if (!rawData) {
-    return safeJson(500, { error: 'Failed to fetch financial data. ' + (dataFetchError || '') });
+    throw new Error('Failed to fetch financial data. ' + (dataFetchError || ''));
   }
 
   // ── Step 2: Compute all quantitative scores ─────────────────────────────────
@@ -170,8 +172,14 @@ export default async function handler(req, res) {
     dataQuality: rawData.dataQuality || {},
   };
 
-  if (!timedOut) res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate');
-  return safeJson(200, { success: true, data: finalReport });
+    if (!timedOut) res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate');
+    return safeJson(200, { success: true, data: finalReport });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (!timedOut && !res.headersSent) {
+      return await fallbackProxy(req, res, err);
+    }
+  }
 }
 
 // ── Gemini API call ───────────────────────────────────────────────────────────
@@ -372,4 +380,25 @@ function buildFallbackAnalysis() {
     catalysts: { positive: ['Data unavailable'], negative: ['Data unavailable'] },
     overallScore: { businessQuality: 5, financialHealth: 5, valuation: 5, management: 5, overall: 5 },
   };
+}
+
+async function fallbackProxy(req, res, error) {
+  console.log('[report] Initiating fallback proxy to FastAPI backend due to:', error.message);
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      return res.status(200).json(data);
+    } else {
+      const errData = await response.json();
+      return res.status(response.status).json(errData);
+    }
+  } catch (proxyErr) {
+    console.error('[report] Fallback proxy failed:', proxyErr);
+    return res.status(500).json({ error: 'Both local generation and backend fallback failed', detail: error.message });
+  }
 }
