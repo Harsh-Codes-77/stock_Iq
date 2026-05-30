@@ -16,3 +16,6 @@ documents/
 
 # PDF test files
 backend/test_doc.pdf
+chroma_db/
+test_doc.pdf
+
