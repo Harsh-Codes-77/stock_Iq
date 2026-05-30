@@ -87,8 +87,8 @@ async def retrieve_chunks(
     ticker: str,
     query: str,
     n_results: int = 8,
-    section_type_filter: str = None,
-    document_type_filter: str = None,
+    section_type_filter: str | list[str] = None,
+    document_type_filter: str | list[str] = None,
     fiscal_year_filter: int = None
 ) -> list[dict]:
     """
@@ -105,9 +105,15 @@ async def retrieve_chunks(
     # Build where filter
     where_conditions = []
     if section_type_filter:
-        where_conditions.append({"section_type": {"$eq": section_type_filter}})
+        if isinstance(section_type_filter, list):
+            where_conditions.append({"section_type": {"$in": section_type_filter}})
+        else:
+            where_conditions.append({"section_type": {"$eq": section_type_filter}})
     if document_type_filter:
-        where_conditions.append({"document_type": {"$eq": document_type_filter}})
+        if isinstance(document_type_filter, list):
+            where_conditions.append({"document_type": {"$in": document_type_filter}})
+        else:
+            where_conditions.append({"document_type": {"$eq": document_type_filter}})
     if fiscal_year_filter:
         where_conditions.append({"fiscal_year": {"$eq": fiscal_year_filter}})
 
