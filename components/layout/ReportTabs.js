@@ -6,6 +6,7 @@ const TABS = [
   { id: 'financials', label: 'FINANCIALS' },
   { id: 'valuation', label: 'VALUATION' },
   { id: 'forensics', label: 'FORENSICS' },
+  { id: 'concall', label: 'CONCALL' },
   { id: 'shareholding', label: 'SHAREHOLDING' },
   { id: 'risks', label: 'RISKS' },
 ];
