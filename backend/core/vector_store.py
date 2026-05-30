@@ -1,3 +1,5 @@
+import numpy as np
+np.float_ = np.float64
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 from loguru import logger
