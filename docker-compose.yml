@@ -1,0 +1,33 @@
+version: '3.9'
+
+services:
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+    environment:
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/stockiq
+      - REDIS_URL=redis://redis:6379
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on: [postgres, redis]
+    volumes:
+      - ./documents:/app/documents
+      - ./chroma_db:/app/chroma_db
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: stockiq
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/db/migrations:/docker-entrypoint-initdb.d
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:
