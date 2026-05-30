@@ -14,3 +14,5 @@ backend/**/*.pyc
 backend/db/data/
 documents/
 
+# PDF test files
+backend/test_doc.pdf
