@@ -16,15 +16,14 @@ from ..core.config import settings
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=60))
-async def embed_text(text: str) -> list[float]:
-    """Embed a single text string using Gemini text-embedding-004 with fallback."""
+async def _embed_text_with_task_type(text: str, task_type: str) -> list[float]:
+    """Embed text using Gemini with model fallback for the given task type."""
     for model_name in ["models/text-embedding-004", "models/gemini-embedding-2"]:
         try:
             result = genai.embed_content(
                 model=model_name,
                 content=text,
-                task_type="retrieval_document"
+                task_type=task_type
             )
             return result["embedding"]
         except Exception as e:
@@ -32,9 +31,14 @@ async def embed_text(text: str) -> list[float]:
             if "not found" in err_msg or "404" in err_msg or "not supported" in err_msg:
                 logger.warning(f"Embedding model {model_name} not found or unsupported, trying fallback...")
                 continue
-            logger.error(f"Embedding failed for model {model_name}: {e}")
+            logger.error(f"Embedding failed for task_type {task_type} with model {model_name}: {e}")
             raise
-    raise Exception("All embedding models failed.")
+    raise Exception(f"All embedding models failed for task_type {task_type}.")
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=60))
+async def embed_text(text: str) -> list[float]:
+    """Embed a single text string using Gemini text-embedding-004 with fallback."""
+    return await _embed_text_with_task_type(text, "retrieval_document")
 
 async def store_chunks_in_vector_db(
     ticker: str,
@@ -153,19 +157,4 @@ async def retrieve_chunks(
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=60))
 async def embed_text_query(text: str) -> list[float]:
     """Embed a query string (different task_type from document embedding)."""
-    for model_name in ["models/text-embedding-004", "models/gemini-embedding-2"]:
-        try:
-            result = genai.embed_content(
-                model=model_name,
-                content=text,
-                task_type="retrieval_query"
-            )
-            return result["embedding"]
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "not found" in err_msg or "404" in err_msg or "not supported" in err_msg:
-                logger.warning(f"Embedding model {model_name} not found or unsupported, trying fallback...")
-                continue
-            logger.error(f"Query embedding failed for model {model_name}: {e}")
-            raise
-    raise Exception("All query embedding models failed.")
+    return await _embed_text_with_task_type(text, "retrieval_query")
