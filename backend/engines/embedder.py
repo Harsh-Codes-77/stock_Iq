@@ -8,6 +8,8 @@ Collection naming: stockiq_{ticker_lowercase}
   e.g. stockiq_reliance, stockiq_tcs
 """
 
+import asyncio
+
 import google.generativeai as genai
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -21,10 +23,11 @@ async def embed_text(text: str) -> list[float]:
     """Embed a single text string using Gemini text-embedding-004 with fallback."""
     for model_name in ["models/text-embedding-004", "models/gemini-embedding-2"]:
         try:
-            result = genai.embed_content(
+            result = await asyncio.to_thread(
+                genai.embed_content,
                 model=model_name,
                 content=text,
-                task_type="retrieval_document"
+                task_type="retrieval_document",
             )
             return result["embedding"]
         except Exception as e:
@@ -155,10 +158,11 @@ async def embed_text_query(text: str) -> list[float]:
     """Embed a query string (different task_type from document embedding)."""
     for model_name in ["models/text-embedding-004", "models/gemini-embedding-2"]:
         try:
-            result = genai.embed_content(
+            result = await asyncio.to_thread(
+                genai.embed_content,
                 model=model_name,
                 content=text,
-                task_type="retrieval_query"
+                task_type="retrieval_query",
             )
             return result["embedding"]
         except Exception as e:
