@@ -291,7 +291,25 @@ def _calculate_completeness(report: dict) -> float:
     return round((completed / len(fields)) * 100.0, 2)
 
 
-async def generate_full_report(ticker: str, force_refresh: bool = False) -> dict:
+async def _update_job(job_id: str, progress: int, status: str = "running", result: dict = None, error: str = None):
+    if not job_id:
+        return
+    try:
+        from backend.core.cache import cache_set
+        payload = {
+            "status": status,
+            "progress_pct": progress
+        }
+        if result is not None:
+            payload["result"] = result
+        if error is not None:
+            payload["error"] = error
+        await cache_set(f"job:{job_id}", payload, ttl=3600)
+    except Exception as e:
+        logger.warning(f"Failed to update job status for {job_id}: {e}")
+
+
+async def generate_full_report(ticker: str, force_refresh: bool = False, job_id: str = None) -> dict:
     """
     Master pipeline. Calls all engines in order.
     Returns complete report JSON.
@@ -303,209 +321,224 @@ async def generate_full_report(ticker: str, force_refresh: bool = False) -> dict
         "errors": []
     }
 
-    # Stage 1: Company Resolution
     try:
-        company = await search_company_website(ticker_upper)
-    except Exception as e:
-        logger.error(f"Company resolution failed for {ticker_upper}: {e}")
-        company = {
-            "ticker": ticker_upper,
-            "company_name": ticker_upper,
-            "official_website": None,
-            "search_confidence": "LOW",
-            "error": str(e)
-        }
+        await _update_job(job_id, 5)
 
-    try:
-        db_company = await get_or_create_company(
-            ticker=ticker_upper,
-            company_name=company.get("company_name"),
-            official_website=company.get("official_website")
-        )
-        company_id = db_company["id"]
-        company["id"] = company_id
-        sector = db_company.get("sector") or "IT"
-    except Exception as e:
-        logger.error(f"Database company mapping failed: {e}")
-        company_id = 0
-        sector = "IT"
-
-    _log(report, "STAGE_1_COMPANY_RESOLVER", company)
-
-    # Stage 2: IR Discovery
-    ir_data = {}
-    try:
-        if company.get("official_website"):
-            ir_data = await discover_ir_page(company["official_website"])
-            if ir_data.get("ir_url") and company_id > 0:
-                await get_or_create_company(ticker_upper, ir_page_url=ir_data["ir_url"])
-    except Exception as e:
-        logger.error(f"IR discovery failed: {e}")
-        report["errors"].append(f"ir_discovery: {str(e)}")
-
-    _log(report, "STAGE_2_IR_DISCOVERY", {"ir_found": ir_data.get("ir_found"), "ir_url": ir_data.get("ir_url")})
-
-    # Stage 3: Document Crawling
-    documents = []
-    try:
-        if company_id > 0:
-            existing_docs = await get_existing_documents(ticker_upper)
-            if existing_docs and not force_refresh:
-                documents = existing_docs
-                _log(report, "STAGE_3_DOCUMENTS", {"count": len(documents), "crawled_today": False})
-            else:
-                documents = await crawl_and_store_documents(ticker_upper, company_id, ir_data.get("document_links", []))
-                _log(report, "STAGE_3_DOCUMENTS", {"count": len(documents), "crawled_today": True})
-    except Exception as e:
-        logger.error(f"Document crawling failed: {e}")
-        report["errors"].append(f"document_crawling: {str(e)}")
-
-    # Stage 4: PDF Extraction + Chunking + Embedding
-    try:
-        for doc in documents:
-            if doc.get("extraction_status") != "done":
-                try:
-                    extracted = extract_pdf(doc["local_path"])
-                    chunks = chunk_document(extracted.get("pages", []), doc["document_type"])
-                    fiscal_yr = doc.get("fiscal_year")
-                    try:
-                        fiscal_yr_int = int(fiscal_yr) if fiscal_yr else None
-                    except ValueError:
-                        fiscal_yr_int = None
-
-                    await store_chunks_in_vector_db(
-                        ticker=ticker_upper,
-                        document_id=doc["id"],
-                        document_type=doc["document_type"],
-                        fiscal_year=fiscal_yr_int,
-                        chunks=chunks
-                    )
-
-                    await update_document_extraction_status(doc["id"], "done", len(extracted.get("pages", [])))
-                except Exception as e:
-                    logger.error(f"Failed to extract document {doc.get('id')}: {e}")
-                    report["errors"].append(f"document_extraction_{doc.get('id')}: {str(e)}")
-    except Exception as e:
-        logger.error(f"PDF extraction phase failed: {e}")
-        report["errors"].append(f"pdf_extraction_phase: {str(e)}")
-
-    _log(report, "STAGE_4_EXTRACTION_EMBEDDING", {"processed_count": len(documents)})
-
-    # Stage 5: Financial Data Extraction
-    financials = []
-    try:
-        # If financials are empty in database, trigger structured extraction from available docs first
-        financials = await extract_structured_financials(ticker_upper)
-        if (not financials or force_refresh) and documents:
-            for doc in documents:
-                try:
-                    async with AsyncSessionLocal() as db:
-                        upserted = await process_document_financials(doc["id"], db)
-                        logger.info(f"Processed financials for document ID {doc['id']}: upserted {upserted} rows")
-                except Exception as e:
-                    logger.error(f"Structured extraction from document {doc.get('id')} failed: {e}")
-            financials = await extract_structured_financials(ticker_upper)
-    except Exception as e:
-        logger.error(f"Financial extraction stage failed: {e}")
-        report["errors"].append(f"financial_extraction_stage: {str(e)}")
-
-    _log(report, "STAGE_5_FINANCIALS", {"years_available": len(financials)})
-
-    # Stage 6: Quantitative Scores
-    quant = {}
-    if len(financials) >= 2:
+        # Stage 1: Company Resolution
         try:
-            quant["piotroski"] = piotroski_f_score(financials)
-            quant["beneish"] = beneish_m_score(financials)
-            quant["altman"] = altman_z_score_emerging_markets(financials)
-            quant["dupont"] = dupont_decomposition(financials)
-            quant["wcc"] = working_capital_cycle(financials)
-
-            # Build inputs for WACC
-            latest = financials[0]
-            market_cap = (latest.get("shares_outstanding") or 1.0) * (latest.get("share_price") or latest.get("price") or 100.0)
-            if not market_cap or market_cap == 0:
-                market_cap = 10000.0
-            total_debt = latest.get("total_debt") or 0.0
-            beta = latest.get("beta") or 1.0
-
-            wacc_res = calculate_wacc(market_cap, total_debt, beta)
-            quant["wacc"] = wacc_res
-
-            # DCF Valuation
-            last_fcf = latest.get("free_cash_flow") or (latest.get("cfo", 0.0) - abs(latest.get("capex", 0.0)))
-            wacc_val = wacc_res.get("wacc") or 0.10
-            quant["dcf"] = dcf_valuation(
-                last_fcf=last_fcf,
-                wacc=wacc_val,
-                price=latest.get("share_price") or latest.get("price"),
-                shares=latest.get("shares_outstanding"),
-                net_debt=total_debt
-            )
-
-            quant["incremental_roce"] = incremental_roce(financials)
-            quant["operating_leverage"] = operating_leverage(financials)
+            company = await search_company_website(ticker_upper)
         except Exception as e:
-            logger.error(f"Quantitative scores calculation failed: {e}")
-            report["errors"].append(f"quant_scores: {str(e)}")
+            logger.error(f"Company resolution failed for {ticker_upper}: {e}")
+            company = {
+                "ticker": ticker_upper,
+                "company_name": ticker_upper,
+                "official_website": None,
+                "search_confidence": "LOW",
+                "error": str(e)
+            }
 
-    _log(report, "STAGE_6_QUANT_SCORES", {"calculated": bool(quant)})
+        try:
+            db_company = await get_or_create_company(
+                ticker=ticker_upper,
+                company_name=company.get("company_name"),
+                official_website=company.get("official_website")
+            )
+            company_id = db_company["id"]
+            company["id"] = company_id
+            sector = db_company.get("sector") or "IT"
+        except Exception as e:
+            logger.error(f"Database company mapping failed: {e}")
+            company_id = 0
+            sector = "IT"
 
-    # Stage 7: Rules Engine
-    signals = []
-    try:
-        shareholding_data = resolve_shareholding_data(financials)
-        rules_res = run_all_rules(financials, shareholding_data)
-        if isinstance(rules_res, list):
-            signals = rules_res
+        _log(report, "STAGE_1_COMPANY_RESOLVER", company)
+        await _update_job(job_id, 15)
+
+        # Stage 2: IR Discovery
+        ir_data = {}
+        try:
+            if company.get("official_website"):
+                ir_data = await discover_ir_page(company["official_website"])
+                if ir_data.get("ir_url") and company_id > 0:
+                    await get_or_create_company(ticker_upper, ir_page_url=ir_data["ir_url"])
+        except Exception as e:
+            logger.error(f"IR discovery failed: {e}")
+            report["errors"].append(f"ir_discovery: {str(e)}")
+
+        _log(report, "STAGE_2_IR_DISCOVERY", {"ir_found": ir_data.get("ir_found"), "ir_url": ir_data.get("ir_url")})
+        await _update_job(job_id, 30)
+
+        # Stage 3: Document Crawling
+        documents = []
+        try:
+            if company_id > 0:
+                existing_docs = await get_existing_documents(ticker_upper)
+                if existing_docs and not force_refresh:
+                    documents = existing_docs
+                    _log(report, "STAGE_3_DOCUMENTS", {"count": len(documents), "crawled_today": False})
+                else:
+                    documents = await crawl_and_store_documents(ticker_upper, company_id, ir_data.get("document_links", []))
+                    _log(report, "STAGE_3_DOCUMENTS", {"count": len(documents), "crawled_today": True})
+        except Exception as e:
+            logger.error(f"Document crawling failed: {e}")
+            report["errors"].append(f"document_crawling: {str(e)}")
+
+        await _update_job(job_id, 45)
+
+        # Stage 4: PDF Extraction + Chunking + Embedding
+        try:
+            for doc in documents:
+                if doc.get("extraction_status") != "done":
+                    try:
+                        extracted = extract_pdf(doc["local_path"])
+                        chunks = chunk_document(extracted.get("pages", []), doc["document_type"])
+                        fiscal_yr = doc.get("fiscal_year")
+                        try:
+                            fiscal_yr_int = int(fiscal_yr) if fiscal_yr else None
+                        except ValueError:
+                            fiscal_yr_int = None
+
+                        await store_chunks_in_vector_db(
+                            ticker=ticker_upper,
+                            document_id=doc["id"],
+                            document_type=doc["document_type"],
+                            fiscal_year=fiscal_yr_int,
+                            chunks=chunks
+                        )
+
+                        await update_document_extraction_status(doc["id"], "done", len(extracted.get("pages", [])))
+                    except Exception as e:
+                        logger.error(f"Failed to extract document {doc.get('id')}: {e}")
+                        report["errors"].append(f"document_extraction_{doc.get('id')}: {str(e)}")
+        except Exception as e:
+            logger.error(f"PDF extraction phase failed: {e}")
+            report["errors"].append(f"pdf_extraction_phase: {str(e)}")
+
+        _log(report, "STAGE_4_EXTRACTION_EMBEDDING", {"processed_count": len(documents)})
+        await _update_job(job_id, 60)
+
+        # Stage 5: Financial Data Extraction
+        financials = []
+        try:
+            financials = await extract_structured_financials(ticker_upper)
+            if (not financials or force_refresh) and documents:
+                for doc in documents:
+                    try:
+                        async with AsyncSessionLocal() as db:
+                            upserted = await process_document_financials(doc["id"], db)
+                            logger.info(f"Processed financials for document ID {doc['id']}: upserted {upserted} rows")
+                    except Exception as e:
+                        logger.error(f"Structured extraction from document {doc.get('id')} failed: {e}")
+                financials = await extract_structured_financials(ticker_upper)
+        except Exception as e:
+            logger.error(f"Financial extraction stage failed: {e}")
+            report["errors"].append(f"financial_extraction_stage: {str(e)}")
+
+        _log(report, "STAGE_5_FINANCIALS", {"years_available": len(financials)})
+        await _update_job(job_id, 70)
+
+        # Stage 6: Quantitative Scores
+        quant = {}
+        if len(financials) >= 2:
+            try:
+                quant["piotroski"] = piotroski_f_score(financials)
+                quant["beneish"] = beneish_m_score(financials)
+                quant["altman"] = altman_z_score_emerging_markets(financials)
+                quant["dupont"] = dupont_decomposition(financials)
+                quant["wcc"] = working_capital_cycle(financials)
+
+                # Build inputs for WACC
+                latest = financials[0]
+                market_cap = (latest.get("shares_outstanding") or 1.0) * (latest.get("share_price") or latest.get("price") or 100.0)
+                if not market_cap or market_cap == 0:
+                    market_cap = 10000.0
+                total_debt = latest.get("total_debt") or 0.0
+                beta = latest.get("beta") or 1.0
+
+                wacc_res = calculate_wacc(market_cap, total_debt, beta)
+                quant["wacc"] = wacc_res
+
+                # DCF Valuation
+                last_fcf = latest.get("free_cash_flow") or (latest.get("cfo", 0.0) - abs(latest.get("capex", 0.0)))
+                wacc_val = wacc_res.get("wacc") or 0.10
+                quant["dcf"] = dcf_valuation(
+                    last_fcf=last_fcf,
+                    wacc=wacc_val,
+                    price=latest.get("share_price") or latest.get("price"),
+                    shares=latest.get("shares_outstanding"),
+                    net_debt=total_debt
+                )
+
+                quant["incremental_roce"] = incremental_roce(financials)
+                quant["operating_leverage"] = operating_leverage(financials)
+            except Exception as e:
+                logger.error(f"Quantitative scores calculation failed: {e}")
+                report["errors"].append(f"quant_scores: {str(e)}")
+
+        _log(report, "STAGE_6_QUANT_SCORES", {"calculated": bool(quant)})
+        await _update_job(job_id, 80)
+
+        # Stage 7: Rules Engine
+        signals = []
+        try:
+            shareholding_data = resolve_shareholding_data(financials)
+            rules_res = run_all_rules(financials, shareholding_data)
+            if isinstance(rules_res, list):
+                signals = rules_res
+        except Exception as e:
+            logger.error(f"Rules engine run failed: {e}")
+            report["errors"].append(f"rules_engine: {str(e)}")
+
+        _log(report, "STAGE_7_RULES_ENGINE", {"signals_count": len(signals)})
+        await _update_job(job_id, 90)
+
+        # Stage 8: Concurrent Analysis Engines
+        shareholding = resolve_shareholding_data(financials)
+        current_metrics = resolve_current_metrics(financials)
+
+        (
+            concall_analysis,
+            forensic_analysis,
+            rag_analysis,
+            valuation
+        ) = await asyncio.gather(
+            run_concall_analysis(ticker_upper),
+            run_forensic_analysis(ticker_upper, financials, quant, signals, shareholding),
+            run_rag_analysis(ticker_upper, financials, quant, signals),
+            asyncio.to_thread(run_full_valuation, financials, current_metrics, quant.get("wacc", {}), sector),
+            return_exceptions=True
+        )
+
+        # Handle exceptions from gather
+        for name, result in [
+            ("concall", concall_analysis),
+            ("forensic", forensic_analysis),
+            ("rag", rag_analysis),
+            ("valuation", valuation)
+        ]:
+            if isinstance(result, Exception):
+                logger.error(f"Stage 8 concurrent run failed for {name}: {result}")
+                report["errors"].append(f"{name}: {str(result)}")
+
+        # Assemble final report
+        report.update({
+            "company": company,
+            "financials": financials,
+            "quant_scores": quant,
+            "signals": [s.__dict__ if hasattr(s, "__dict__") else s for s in signals],
+            "concall_analysis": concall_analysis if not isinstance(concall_analysis, Exception) else None,
+            "forensic_analysis": forensic_analysis if not isinstance(forensic_analysis, Exception) else None,
+            "rag_analysis": rag_analysis if not isinstance(rag_analysis, Exception) else None,
+            "valuation": valuation if not isinstance(valuation, Exception) else None,
+            "generated_at": datetime.utcnow().isoformat()
+        })
+
+        report["data_completeness"] = _calculate_completeness(report)
+        _log(report, "STAGE_8_CONCURRENT_ANALYSIS_COMPLETE", {"completeness": report["data_completeness"]})
+
+        await _update_job(job_id, 100, status="completed", result=report)
+        return report
     except Exception as e:
-        logger.error(f"Rules engine run failed: {e}")
-        report["errors"].append(f"rules_engine: {str(e)}")
-
-    _log(report, "STAGE_7_RULES_ENGINE", {"signals_count": len(signals)})
-
-    # Stage 8: Concurrent Analysis Engines
-    shareholding = resolve_shareholding_data(financials)
-    current_metrics = resolve_current_metrics(financials)
-
-    (
-        concall_analysis,
-        forensic_analysis,
-        rag_analysis,
-        valuation
-    ) = await asyncio.gather(
-        run_concall_analysis(ticker_upper),
-        run_forensic_analysis(ticker_upper, financials, quant, signals, shareholding),
-        run_rag_analysis(ticker_upper, financials, quant, signals),
-        asyncio.to_thread(run_full_valuation, financials, current_metrics, quant.get("wacc", {}), sector),
-        return_exceptions=True
-    )
-
-    # Handle exceptions from gather
-    for name, result in [
-        ("concall", concall_analysis),
-        ("forensic", forensic_analysis),
-        ("rag", rag_analysis),
-        ("valuation", valuation)
-    ]:
-        if isinstance(result, Exception):
-            logger.error(f"Stage 8 concurrent run failed for {name}: {result}")
-            report["errors"].append(f"{name}: {str(result)}")
-
-    # Assemble final report
-    report.update({
-        "company": company,
-        "financials": financials,
-        "quant_scores": quant,
-        "signals": [s.__dict__ if hasattr(s, "__dict__") else s for s in signals],
-        "concall_analysis": concall_analysis if not isinstance(concall_analysis, Exception) else None,
-        "forensic_analysis": forensic_analysis if not isinstance(forensic_analysis, Exception) else None,
-        "rag_analysis": rag_analysis if not isinstance(rag_analysis, Exception) else None,
-        "valuation": valuation if not isinstance(valuation, Exception) else None,
-        "generated_at": datetime.utcnow().isoformat()
-    })
-
-    report["data_completeness"] = _calculate_completeness(report)
-    _log(report, "STAGE_8_CONCURRENT_ANALYSIS_COMPLETE", {"completeness": report["data_completeness"]})
-
-    return report
+        logger.error(f"Report orchestrator crashed: {e}")
+        await _update_job(job_id, 100, status="failed", error=str(e))
+        raise e
