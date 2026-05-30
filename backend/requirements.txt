@@ -19,3 +19,5 @@ python-dotenv==1.0.1
 tenacity==8.3.0
 loguru==0.7.2
 python-multipart==0.0.9
+weasyprint==61.2
+matplotlib==3.8.4

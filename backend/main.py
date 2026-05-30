@@ -3,9 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 try:
-    from api import analyze, documents, health
+    from api import analyze, documents, health, export
 except ImportError:
-    from .api import analyze, documents, health
+    from .api import analyze, documents, health, export
 
 app = FastAPI(
     title="StockIQ Institutional Research Engine",
@@ -23,6 +23,7 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api")
 app.include_router(analyze.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
+app.include_router(export.router, prefix="/api")
 
 @app.on_event("startup")
 async def startup():
