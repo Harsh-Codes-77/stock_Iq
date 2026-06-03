@@ -1,0 +1,21 @@
+.next/
+node_modules/
+.env
+.env.local
+.env*.local
+.vercel
+*.log
+.DS_Store
+
+# Python venv and cache
+backend/.venv/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/db/data/
+documents/
+
+# PDF test files
+backend/test_doc.pdf
+chroma_db/
+test_doc.pdf
+

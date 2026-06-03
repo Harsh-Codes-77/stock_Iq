@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+/* ── Theme (Tailwind v4) ───────────────────────────────────────────────────── */
+@theme {
+  --color-bg-primary: #0C0D0E;
+  --color-bg-secondary: #141617;
+  --color-bg-tertiary: #1B1E1F;
+  --color-border: #2B2C2D;
+  --color-text-primary: #F2F4F7;
+  --color-text-secondary: #889096;
+  --color-text-muted: #4A4D4F;
+  --color-accent: #E8C13F;
+  --color-positive: #30A46C;
+  --color-negative: #E5484D;
+  --color-neutral: #889096;
+
+  --font-mono: 'IBM Plex Mono', monospace;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-sans: 'DM Sans', sans-serif;
+
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+}
+
+/* ── Custom Properties ─────────────────────────────────────────────────────── */
+:root {
+  --bg-0: #0C0D0E;
+  --bg-1: #141617;
+  --bg-2: #1B1E1F;
+  --border-subtle: #2B2C2D;
+  --text-0: #F2F4F7;
+  --text-1: #889096;
+  --text-2: #4A4D4F;
+  --accent-red: #E5484D;
+  --accent-green: #30A46C;
+  --accent-yellow: #E8C13F;
+
+  /* legacy map */
+  --bg-primary: var(--bg-0);
+  --bg-secondary: var(--bg-1);
+  --bg-tertiary: var(--bg-2);
+  --border: var(--border-subtle);
+  --text-primary: var(--text-0);
+  --text-secondary: var(--text-1);
+  --text-muted: var(--text-2);
+  --accent: var(--accent-yellow);
+  --positive: var(--accent-green);
+  --negative: var(--accent-red);
+
+  --font-mono: 'IBM Plex Mono', monospace;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-sans: 'DM Sans', sans-serif;
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; background-color: var(--bg-0); }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-size: 14px;
+  line-height: 1.5;
+}
+a { color: inherit; text-decoration: none; }
+button { cursor: pointer; font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+
+/* ── Typography ────────────────────────────────────────────────────────────── */
+.label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-2);
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-subtle); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-2); }
+
+/* ── Data Tables ───────────────────────────────────────────────────────────── */
+.data-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12px; }
+.data-table th {
+  font-family: var(--font-sans); font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-1);
+  padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border-subtle);
+}
+.data-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-feature-settings: 'tnum' 1; }
+.data-table tr:hover { background: var(--bg-1); }
+.data-table td.num { text-align: right; font-family: var(--font-mono); }
+
+/* ── Section Divider ───────────────────────────────────────────────────────── */
+.section-divider { display: flex; align-items: center; gap: 12px; margin: 24px 0 16px; }
+.section-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-subtle); }
+.section-divider span {
+  font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-1); white-space: nowrap;
+}
+
+/* ── Skeleton Loading ──────────────────────────────────────────────────────── */
+.skeleton { background: var(--bg-1); animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+
+/* ── Tab styles ────────────────────────────────────────────────────────────── */
+.tab-bar {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto; -ms-overflow-style: none; scrollbar-width: none;
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+.tab-btn {
+  background: none; border: none; padding: 10px 16px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-1);
+  white-space: nowrap; border-bottom: 2px solid transparent; transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--text-0); }
+.tab-btn.active { color: var(--text-0); border-bottom-color: var(--accent-yellow); }
+
+/* ── Card ──────────────────────────────────────────────────────────────────── */
+.card { background: var(--bg-1); border: 1px solid var(--border-subtle); padding: 16px; }
+
+/* ── Verdict badge ─────────────────────────────────────────────────────────── */
+.verdict-badge { display: inline-block; font-family: var(--font-mono); font-weight: 700; font-size: 13px; letter-spacing: 0.05em; padding: 4px 12px; }
+.verdict-buy { background: rgba(48, 164, 108, 0.1); color: var(--accent-green); border: 1px solid rgba(48, 164, 108, 0.3); }
+.verdict-sell, .verdict-avoid { background: rgba(229, 72, 77, 0.1); color: var(--accent-red); border: 1px solid rgba(229, 72, 77, 0.3); }
+.verdict-hold { background: rgba(232, 193, 63, 0.1); color: var(--accent-yellow); border: 1px solid rgba(232, 193, 63, 0.3); }
+
+/* ── Recharts overrides ────────────────────────────────────────────────────── */
+.recharts-cartesian-axis-tick-value { font-family: var(--font-mono) !important; font-size: 10px !important; fill: var(--text-1) !important; }
+.recharts-legend-item-text { font-family: var(--font-sans) !important; font-size: 11px !important; color: var(--text-1) !important; }
+
+/* ── Responsive ────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  body { font-size: 13px; }
+  h2 { font-size: 24px !important; }
+  .card { padding: 12px; }
+  .tab-btn { padding: 8px 12px; font-size: 10px; }
+  .data-table th, .data-table td { padding: 5px 6px; font-size: 11px; }
+  .hidden-mobile {
+    display: none !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .hidden-xs-mobile {
+    display: none !important;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+}
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
