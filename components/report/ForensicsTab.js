@@ -1,19 +1,18 @@
 // components/report/ForensicsTab.js
-// Forensics (Piotroski, Beneish, Altman) + Rules Engine Signals in minimal terminal style
+// Forensics (Piotroski, Beneish, Altman) in minimal terminal style
 
 import dynamic from 'next/dynamic';
 const PatCfoChart = dynamic(() => import('../charts/PatCfoChart'), { ssr: false });
 
 export default function ForensicsTab({ data }) {
-  const p = data.quant_scores?.piotroski || data.computedScores?.piotroski || {};
-  const b = data.quant_scores?.beneish || data.computedScores?.beneish || {};
-  const a = data.quant_scores?.altman || data.computedScores?.altman || {};
+  const p = data.computedScores?.piotroski || {};
+  const b = data.computedScores?.beneish || {};
+  const a = data.computedScores?.altman || {};
   const ai = data.aiAnalysis || {};
   const fin = data.financials || {};
   const years = [...(fin.annualYears || [])].reverse();
   const pat = [...(fin.pat || [])].reverse();
   const cfo = [...(fin.cfo || [])].reverse();
-  const signals = data.signals || [];
 
   const signalLabels = {
     roa: 'Positive ROA', cfoPositive: 'Positive CFO', roaImproving: 'ROA Improving',
@@ -47,80 +46,6 @@ export default function ForensicsTab({ data }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      
-      {/* Rules Engine Signals (at the top for instant forensic flags) */}
-      <div>
-        <h3 style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '11px',
-          fontWeight: 600,
-          color: 'var(--text-1)',
-          textTransform: 'uppercase',
-          marginBottom: '12px',
-          letterSpacing: '0.05em'
-        }}>
-          Financial Intelligence Rules Engine Signals ({signals.length})
-        </h3>
-        <div style={{
-          backgroundColor: 'var(--bg-1)',
-          border: '1px solid var(--border-subtle)',
-          padding: '16px',
-          overflowX: 'auto'
-        }}>
-          {signals.length === 0 ? (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-2)', textAlign: 'center', padding: '16px' }}>
-              NO RED FLAGS OR ANOMALIES DETECTED BY THE RULES ENGINE
-            </div>
-          ) : (
-            <table style={{ width: '100%', minWidth: '700px', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-2)', fontWeight: 'normal', width: '90px' }}>RULE ID</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-2)', fontWeight: 'normal', width: '110px' }}>SEVERITY</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-2)', fontWeight: 'normal', width: '130px' }}>CATEGORY</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-2)', fontWeight: 'normal' }}>TITLE & EVIDENCE</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-2)', fontWeight: 'normal' }}>IMPLICATION</th>
-                </tr>
-              </thead>
-              <tbody>
-                {signals.map((sig, i) => {
-                  const sev = (sig.severity || '').toUpperCase();
-                  let color = 'var(--text-0)';
-                  if (sev === 'RED_FLAG') color = 'var(--accent-red)';
-                  else if (sev === 'YELLOW_FLAG') color = 'var(--accent-yellow)';
-                  else if (sev === 'POSITIVE') color = 'var(--accent-green)';
-                  
-                  return (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                      <td style={{ padding: '10px 8px', color: 'var(--text-1)' }}>{sig.rule_id}</td>
-                      <td style={{ padding: '10px 8px' }}>
-                        <span style={{
-                          fontSize: '9px',
-                          fontWeight: 600,
-                          padding: '2px 6px',
-                          color: color,
-                          backgroundColor: color === 'var(--accent-red)' ? 'rgba(229, 72, 77, 0.1)' : color === 'var(--accent-yellow)' ? 'rgba(232, 193, 63, 0.1)' : 'rgba(48, 164, 108, 0.1)',
-                          border: `1px solid ${color}33`
-                        }}>
-                          {sig.severity}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 8px', color: 'var(--text-2)' }}>{sig.category}</td>
-                      <td style={{ padding: '10px 8px' }}>
-                        <div style={{ color: 'var(--text-0)', fontWeight: 500 }}>{sig.title}</div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-2)', marginTop: '2px' }}>{sig.evidence}</div>
-                      </td>
-                      <td style={{ padding: '10px 8px', color: 'var(--text-1)', fontSize: '11px', fontFamily: 'var(--font-sans)', lineHeight: 1.4 }}>
-                        {sig.implication}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
       
       {/* Piotroski F-Score */}
       <div>
@@ -227,7 +152,7 @@ export default function ForensicsTab({ data }) {
               fontWeight: 700,
               color: getBeneishColor(b.flag)
             }}>
-              {b.mScore !== null && b.mScore !== undefined ? b.mScore : b.score !== null && b.score !== undefined ? b.score : '—'}
+              {b.mScore !== null && b.mScore !== undefined ? b.mScore : '—'}
             </span>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{
@@ -324,7 +249,7 @@ export default function ForensicsTab({ data }) {
               fontWeight: 700,
               color: getAltmanColor(a.zone)
             }}>
-              {a.zScore !== null && a.zScore !== undefined ? a.zScore : a.score !== null && a.score !== undefined ? a.score : '—'}
+              {a.zScore !== null && a.zScore !== undefined ? a.zScore : '—'}
             </span>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{

@@ -1,5 +1,5 @@
 // components/report/ValuationTab.js
-// Redesigned with custom table grids, horizontal dividers, null-safe value formatting, Reverse DCF, and EPV metrics.
+// Redesigned with custom table grids, horizontal dividers, and null-safe value formatting.
 
 import dynamic from 'next/dynamic';
 const SensitivityMatrix = dynamic(() => import('../charts/SensitivityMatrix'), { ssr: false });
@@ -11,11 +11,6 @@ export default function ValuationTab({ data }) {
   const metrics = data.currentMetrics || {};
   const ai = data.aiAnalysis?.valuationAnalysis || {};
   const cmp = data.price || null;
-
-  // Valuation Engine rich outputs
-  const valuation = data.valuation || {};
-  const reverseDcf = valuation.reverse_dcf || {};
-  const epv = valuation.earnings_power_value || {};
 
   const waccItems = [
     { label: 'WACC', value: wacc.wacc !== null && wacc.wacc !== undefined ? `${(wacc.wacc * 100).toFixed(1)}%` : '—' },
@@ -34,15 +29,6 @@ export default function ValuationTab({ data }) {
     { label: 'ROE', value: metrics.roe, s: '%' },
     { label: 'ROCE', value: metrics.roce, s: '%' },
   ];
-
-  const formatGrowthRate = (val) => {
-    if (val === null || val === undefined) return '—';
-    // If it's a decimal like 0.125, convert to percentage
-    if (Math.abs(val) < 1.0 && val !== 0) {
-      return `${(val * 100).toFixed(2)}%`;
-    }
-    return `${val.toFixed(2)}%`;
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -90,76 +76,6 @@ export default function ValuationTab({ data }) {
             })}
           </tbody>
         </table>
-      </div>
-
-      {/* Reverse DCF & Earnings Power Value (EPV) */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
-        {/* Reverse DCF Panel */}
-        <div style={{
-          flex: '1 1 300px',
-          backgroundColor: 'var(--bg-1)',
-          border: '1px solid var(--border-subtle)',
-          padding: '16px',
-          fontFamily: 'var(--font-mono)'
-        }}>
-          <div style={{ fontSize: '10px', color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: '8px' }}>
-            REVERSE DCF ANALYSIS
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-2)' }}>Implied FCF Growth Rate (Priced-in by Market)</div>
-          <div style={{ fontSize: '24px', fontWeight: 600, color: 'var(--accent-yellow)', margin: '8px 0' }}>
-            {formatGrowthRate(reverseDcf.implied_growth_rate)}
-          </div>
-          {reverseDcf.interpretation && (
-            <div style={{
-              fontSize: '11px',
-              color: 'var(--text-1)',
-              fontFamily: 'var(--font-sans)',
-              lineHeight: 1.4,
-              borderTop: '1px solid var(--border-subtle)',
-              paddingTop: '8px',
-              marginTop: '8px'
-            }}>
-              {reverseDcf.interpretation}
-            </div>
-          )}
-        </div>
-
-        {/* EPV Panel */}
-        <div style={{
-          flex: '1 1 300px',
-          backgroundColor: 'var(--bg-1)',
-          border: '1px solid var(--border-subtle)',
-          padding: '16px',
-          fontFamily: 'var(--font-mono)'
-        }}>
-          <div style={{ fontSize: '10px', color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: '8px' }}>
-            EARNINGS POWER VALUE (EPV)
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-2)' }}>No-Growth Value per Share</div>
-          <div style={{ fontSize: '24px', fontWeight: 600, color: 'var(--text-0)', margin: '8px 0' }}>
-            {epv.epv ? `₹${Number(epv.epv).toLocaleString('en-IN', { maximumFractionDigits: 1 })}` : '—'}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-2)', display: 'flex', gap: '6px', alignItems: 'center' }}>
-            Upside/Downside to CMP: 
-            <span style={{
-              fontWeight: 600,
-              color: (epv.upside_pct || 0) >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'
-            }}>
-              {epv.upside_pct !== null && epv.upside_pct !== undefined ? `${(epv.upside_pct).toFixed(1)}%` : '—'}
-            </span>
-          </div>
-          <div style={{
-            fontSize: '11px',
-            color: 'var(--text-1)',
-            fontFamily: 'var(--font-sans)',
-            lineHeight: 1.4,
-            borderTop: '1px solid var(--border-subtle)',
-            paddingTop: '8px',
-            marginTop: '8px'
-          }}>
-            EPV isolates current earnings power assuming zero future growth, comparing it against the market price to check for a margin of safety.
-          </div>
-        </div>
       </div>
 
       {/* WACC Assumptions */}
