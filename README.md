@@ -48,71 +48,27 @@ The AI in StockIQ never calculates anything. All quantitative models run in Java
 
 ## 2. How It Works — End to End
 
-```
-User enters ticker (e.g. "RELIANCE" or "TCS")
-          │
-          ▼
-┌─────────────────────────────────────────────────────┐
-│                  pages/api/report.js                 │
-│                   (Next.js API Route)                │
-└─────────────────────────────────────────────────────┘
-          │
-          ├──► STEP 1: Fetch Raw Data (lib/dataFetcher.js)
-          │         │
-          │         ├── Yahoo Finance (via yahoo-finance2)
-          │         │     Live price, market cap, P/E, EV/EBITDA,
-          │         │     beta, 52-week high/low, shares outstanding
-          │         │
-          │         ├── NSE India Public API
-          │         │     Shareholding pattern (promoter/FII/DII),
-          │         │     promoter pledge %, delivery volume
-          │         │
-          │         └── Screener.in (fallback scraper)
-          │               10-year: Revenue, EBITDA, PAT, EPS,
-          │               CFO, Capex, Book Value, Debt, Equity
-          │
-          ├──► STEP 2: Compute Quantitative Scores (lib/quantScores.js)
-          │         │
-          │         ├── Piotroski F-Score        (0–9, 9 binary signals)
-          │         ├── Beneish M-Score          (earnings manipulation detector)
-          │         ├── Altman Z-Score (Z'')     (bankruptcy risk, EM version)
-          │         ├── DuPont ROE Decomposition (3-factor breakdown)
-          │         ├── Working Capital Cycle    (DSO, DIO, DPO, CCC)
-          │         ├── WACC Calculation         (CAPM + India risk-free rate)
-          │         └── DCF Intrinsic Value      (Bear / Base / Bull)
-          │
-          ├──► STEP 3: Build Prompt (lib/geminiPrompt.js)
-          │         │
-          │         └── Injects ALL pre-computed scores + raw financials
-          │             into a structured prompt. AI receives numbers,
-          │             not a request to calculate them.
-          │
-          ├──► STEP 4: Call Google Gemini API
-          │         │
-          │         └── Returns structured JSON with:
-          │             - Investment thesis
-          │             - Business model analysis
-          │             - Forensic accounting interpretation
-          │             - Valuation commentary
-          │             - Risk matrix
-          │             - Catalysts
-          │             - Overall scores
-          │
-          └──► STEP 5: Merge & Return Final Report Object
-                    │
-                    └── { computedScores, financials, aiAnalysis }
-                        sent to frontend as JSON
-
-Frontend (pages/report/[ticker].js)
-          │
-          ├── Tab: OVERVIEW      — Scores, thesis, verdict, target
-          ├── Tab: FINANCIALS    — Revenue/EBITDA charts, PAT vs CFO,
-          │                        ROCE trend, DuPont breakdown
-          ├── Tab: VALUATION     — DCF table, sensitivity matrix, WACC
-          ├── Tab: FORENSICS     — Piotroski signals, Beneish components,
-          │                        Altman Z breakdown, CFO/PAT chart
-          ├── Tab: SHAREHOLDING  — Stacked bar chart (8Q trend), pledge %
-          └── Tab: RISKS         — Risk matrix, catalysts
+```mermaid
+flowchart TD
+    A[User Enters Ticker e.g. ICICIBANK] --> B[Next.js API Route /api/report]
+    B --> C[Data Fetching Layer]
+    C --> D1[Yahoo Finance API<br/>Live Price, Ratios, Beta...]
+    C --> D2[NSE India API<br/>Shareholding, Pledge]
+    C --> D3[Screener.in Scraper<br/>10Y Financials]
+    C --> E[Data Sanitization & Validation]
+    E --> F[Quantitative Engine lib/quantScores.js]
+    F --> G1[Piotroski F-Score 0-9]
+    F --> G2[Beneish M-Score]
+    F --> G3[Altman Z'' Score]
+    F --> G4[DuPont ROE]
+    F --> G5[WACC + 3-Scenario DCF]
+    G1 & G2 & G3 & G4 & G5 --> H[Structured Prompt Builder]
+    H --> I[Google Gemini 1.5 Flash/Pro]
+    I --> J[AI Interpretation JSON]
+    J --> K[Merge Data + AI Analysis]
+    K --> L["Frontend Dashboard<br/>pages/report/[ticker]"]
+    L --> M[Tabs: Overview, Financials, Valuation, etc.]
+    M --> N[PDF Export via html2canvas + jsPDF]
 ```
 
 ---
